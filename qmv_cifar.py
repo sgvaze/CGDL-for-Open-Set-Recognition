@@ -61,6 +61,7 @@ class GAU(object):
         self.labelnum = len(self.labelset)
         self.num,self.dim = np.shape(self.trainfea)
         self.gau = self.train()
+
         self.save_dir = save_dir
 
     def train(self):
@@ -153,7 +154,7 @@ class GAU(object):
 
         #result
         result = np.array(result)
-        np.savetxt('{}/Result.txt'.format(save_dir), result)
+        np.savetxt('lvae%d/Result.txt' %args.lamda,result)
 
         for i in range(labelnum+1):
             locals()['resultIndex' + str(i)] = np.argwhere(result == i)
@@ -187,23 +188,16 @@ class GAU(object):
 
 if __name__ == '__main__':
 
-    save_dir = '/users/sagar/open_world_learning/cgdl/reg_classifier'
+    latent_dim = 32
+    save_dir = 'cifar_{}_latent_size'.format(latent_dim)
 
     for epoch in range(1):
 
         # revise(epoch)
-        gau = GAU(epoch=epoch, save_dir=save_dir)
-        omn = ['{}/omn_fea.txt'.format(save_dir), '{}/omn_tar.txt'.format(save_dir),
-                   '{}/omn_pre.txt'.format(save_dir)]
-        mnist_noise = ['{}/mnist_noise_fea.txt'.format(save_dir), '{}/mnist_noise_tar.txt'.format(save_dir),
-                 '{}/mnist_noise_pre.txt'.format(save_dir)]
-        noise = ['{}/noise_fea.txt'.format(save_dir), '{}/noise_tar.txt'.format(save_dir),
-                     '{}/noise_pre.txt'.format(save_dir)]
+        gau = GAU(epoch, save_dir)
+        omn = ['{}/c100_fea.txt'.format(save_dir), '{}/c100_tar.txt'.format(save_dir),
+                   '{}/c100_pre.txt'.format(save_dir)]
 
         perf_omn = gau.test(omn, args.threshold)
-        perf_mnist_noise = gau.test(mnist_noise, args.threshold)
-        perf_noise = gau.test(noise, args.threshold)
-        #
-        ma = [perf_omn, perf_mnist_noise, perf_noise]
-        print(ma)
-        np.savetxt('{}/ma.txt'.format(save_dir), ma)
+        print(perf_omn)
+        np.savetxt('{}/ma.txt'.format(save_dir), perf_omn)

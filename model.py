@@ -8,6 +8,8 @@ reconstruction_function = nn.MSELoss()
 reconstruction_function.size_average = False
 nllloss = nn.NLLLoss()
 
+import math
+
 class CONV(nn.Module):
     def __init__(self, in_ch, out_ch, kernel, padding, stride, flat_dim, latent_dim):
         super(CONV, self).__init__()
@@ -104,7 +106,7 @@ class LVAE(nn.Module):
                  out_ch64=64, out_ch128=128, out_ch256=256, out_ch512=512,
                  kernel1=1, kernel2=2, kernel3=3, padding0=0, padding1=1, padding2=2, stride1=1, stride2=2,
                  flat_dim32=32, flat_dim16=16, flat_dim8=8, flat_dim4=4, flat_dim2=2, flat_dim1=1,
-                 latent_dim512=512, latent_dim256=256, latent_dim128=128, latent_dim64=64, latent_dim32=32, num_class =15):
+                 latent_dim512=512, latent_dim256=256, latent_dim128=128, latent_dim64=64, latent_dim32=32, num_class=15):
         super().__init__()
         self.in_ch = in_ch
         self.out_ch64 = out_ch64
@@ -188,6 +190,7 @@ class LVAE(nn.Module):
     def lnet(self, x, y_de):
         # ---deterministic upward pass
         # upwards
+
         enc1_1, mu_up1_1, var_up1_1 = self.CONV1_1.encode(x)
         enc1_2, mu_up1_2, var_up1_2 = self.CONV1_2.encode(enc1_1)
 
@@ -324,3 +327,136 @@ class LVAE(nn.Module):
         pmu5_1, pvar5_1, pmu4_2, pvar4_2, pmu4_1, pvar4_1, pmu3_2, pvar3_2, pmu3_1, pvar3_1, \
         pmu2_2, pvar2_2, pmu2_1, pvar2_1, pmu1_2, pvar1_2, pmu1_1, pvar1_1 = self.lnet(x, y_de)
         return mu_latent, predict_test, x_re
+
+class RegVAE(LVAE):
+
+    """
+    LadderVAE to be trained without CGDL loss (latent prior is always a unit gaussian)
+    """
+
+    def __init__(self, in_ch=3,
+                 out_ch64=64, out_ch128=128, out_ch256=256, out_ch512=512,
+                 kernel1=1, kernel2=2, kernel3=3, padding0=0, padding1=1, padding2=2, stride1=1, stride2=2,
+                 flat_dim32=32, flat_dim16=16, flat_dim8=8, flat_dim4=4, flat_dim2=2, flat_dim1=1,
+                 latent_dim512=512, latent_dim256=256, latent_dim128=128, latent_dim64=64, latent_dim32=32,
+                 num_class=15):
+
+        super().__init__(in_ch,
+                 out_ch64, out_ch128, out_ch256, out_ch512,
+                 kernel1, kernel2, kernel3, padding0, padding1, padding2, stride1, stride2,
+                 flat_dim32, flat_dim16, flat_dim8, flat_dim4, flat_dim2, flat_dim1,
+                 latent_dim512, latent_dim256, latent_dim128, latent_dim64, latent_dim32,
+                 num_class)
+
+    def one_hot(self, dummy):
+
+        batch_size = dummy.size(0)
+
+        return torch.zeros((batch_size, self.latent_dim32)).cuda()
+
+class Classifier32(nn.Module):
+
+    def __init__(self, in_channels=1, latent_size=100, num_classes=10, batch_size=64, seed=0, **kwargs):
+
+        """
+        Architecture of classifier used in open-set learning literature (C2AE and OSLCFI)
+        Code from: https://github.com/lwneal/counterfactual-open-set/
+        """
+
+        super(self.__class__, self).__init__()
+        self.batch_size = batch_size
+        self.num_classes = num_classes
+        self.conv1 = nn.Conv2d(in_channels,       64,     3, 1, 1, bias=False)
+        self.conv2 = nn.Conv2d(64,      64,     3, 1, 1, bias=False)
+        self.conv3 = nn.Conv2d(64,     128,     3, 2, 1, bias=False)
+
+        self.conv4 = nn.Conv2d(128,    128,     3, 1, 1, bias=False)
+        self.conv5 = nn.Conv2d(128,    128,     3, 1, 1, bias=False)
+        self.conv6 = nn.Conv2d(128,    128,     3, 2, 1, bias=False)
+
+        self.conv7 = nn.Conv2d(128,    128,     3, 1, 1, bias=False)
+        self.conv8 = nn.Conv2d(128,    128,     3, 1, 1, bias=False)
+        self.conv9 = nn.Conv2d(128,    latent_size,     3, 2, 1, bias=False)
+
+        self.bn1 = nn.BatchNorm2d(64)
+        self.bn2 = nn.BatchNorm2d(64)
+        self.bn3 = nn.BatchNorm2d(128)
+
+        self.bn4 = nn.BatchNorm2d(128)
+        self.bn5 = nn.BatchNorm2d(128)
+        self.bn6 = nn.BatchNorm2d(128)
+
+        self.bn7 = nn.BatchNorm2d(128)
+        self.bn8 = nn.BatchNorm2d(128)
+        self.bn9 = nn.BatchNorm2d(latent_size)
+
+        self.avg_pool = nn.AvgPool2d(kernel_size=(4, 4))
+
+        self.fc1 = nn.Linear(latent_size, num_classes)
+        self.dr1 = nn.Dropout2d(0.2)
+        self.dr2 = nn.Dropout2d(0.2)
+        self.dr3 = nn.Dropout2d(0.2)
+
+        # Make sure all initialisations are exactly the same
+        torch.manual_seed(seed)
+        self.apply(weights_init)
+
+    def forward(self, x, return_features=False):
+        batch_size = len(x)
+
+        x = self.dr1(x)
+        x = self.conv1(x)
+        x = self.bn1(x)
+        x = nn.LeakyReLU(0.2)(x)
+        x = self.conv2(x)
+        x = self.bn2(x)
+        x = nn.LeakyReLU(0.2)(x)
+        x = self.conv3(x)
+        x = self.bn3(x)
+        x = nn.LeakyReLU(0.2)(x)
+
+        x = self.dr2(x)
+        x = self.conv4(x)
+        x = self.bn4(x)
+        x = nn.LeakyReLU(0.2)(x)
+        x = self.conv5(x)
+        x = self.bn5(x)
+        x = nn.LeakyReLU(0.2)(x)
+        x = self.conv6(x)
+        x = self.bn6(x)
+        x = nn.LeakyReLU(0.2)(x)
+
+        x = self.dr3(x)
+        x = self.conv7(x)
+        x = self.bn7(x)
+        x = nn.LeakyReLU(0.2)(x)
+        x = self.conv8(x)
+        x = self.bn8(x)
+        x = nn.LeakyReLU(0.2)(x)
+        x = self.conv9(x)
+        x = self.bn9(x)
+        x = nn.LeakyReLU(0.2)(x)
+
+        x = self.avg_pool(x)
+        features = x.squeeze()
+        logits = self.fc1(features)
+
+        if return_features:
+            return logits, features
+        else:
+            return logits
+
+def weights_init(m):
+    classname = m.__class__.__name__
+    # TODO: what about fully-connected layers?
+    if classname.find('Conv') != -1:
+        m.weight.data.normal_(0.0, 0.05)
+    elif classname.find('BatchNorm') != -1:
+        m.weight.data.normal_(1.0, 0.02)
+        m.bias.data.fill_(0)
+    elif classname.find('Linear') != -1:
+        stdv = 1. / math.sqrt(m.weight.size(1))
+        m.weight.data.uniform_(-stdv, stdv)
+        if m.bias is not None:
+            m.bias.data.uniform_(-stdv, stdv)
+

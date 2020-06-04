@@ -47,7 +47,7 @@ class BaseDataLoader:
 class OmniglotLoader(BaseDataLoader):
     def __init__(self, batch_size=64, train=False, shuffle=True, drop_last=False):
         super(OmniglotLoader, self).__init__(batch_size, train, shuffle, drop_last)
-        omniglot_path = 'data/omn_dataset'
+        omniglot_path = '/scratch/shared/beegfs/sagar/datasets/omniglot/python'
 
         if os.path.isdir(omniglot_path):
             print('Files already downloaded and verified')
@@ -61,13 +61,17 @@ class OmniglotLoader(BaseDataLoader):
         self.num_classes = []
 
         for p in [os.path.join(omniglot_path, 'images_background'), os.path.join(omniglot_path, 'images_evaluation')]:
-            for task_path in sorted(os.listdir(p)):
-                task_path = os.path.join(p, task_path)
+            for rel_task_path in sorted(os.listdir(p)):
+                task_path = os.path.join(p, rel_task_path)
+
                 task_images = []
                 task_labels = []
                 for i, cls_path in enumerate(sorted(os.listdir(task_path))):
                     cls_path = os.path.join(task_path, cls_path)
                     ims = [cv2.resize(cv2.imread(os.path.join(cls_path, filename), cv2.IMREAD_GRAYSCALE), (28,28)) / 255 for filename in sorted(os.listdir(cls_path))]
+
+                    # TODO: DEBUG. Invert Omniglot images so they are white on black background
+                    ims = [1 - arr for arr in ims]
 
                     if train:
                         ims = ims[:int(len(ims)*0.69)]
@@ -159,3 +163,9 @@ class OmniglotLoader(BaseDataLoader):
     @property
     def num_classes_multi(self):
         return self.num_classes
+
+if __name__ == '__main__':
+
+    omn_loader = OmniglotLoader(batch_size=64, train=False, drop_last=False)
+    x = next(iter(omn_loader))
+    debug = 0
